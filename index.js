@@ -1,19 +1,23 @@
-require('dotenv').config();
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// WhatsApp Bot Configuration (Hardcoded)
+const OPENROUTER_API_KEY = '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';
+const SITE_URL = 'http://localhost:3000';
+const SITE_NAME = 'WhatsApp Gemini Bot';
 
 // Initialize WhatsApp client
 const client = new Client({
     authStrategy: new LocalAuth()
 });
 
-// Initialize Gemini Pro client
-const genAI = new GoogleGenerativeAI(process.env.OPENROUTER_API_KEY, {
+// Initialize Gemini AI client
+const genAI = new GoogleGenerativeAI(OPENROUTER_API_KEY, {
     baseURL: 'https://openrouter.ai/api/v1',
     headers: {
-        'HTTP-Referer': process.env.SITE_URL,
-        'X-Title': process.env.SITE_NAME
+        'HTTP-Referer': SITE_URL,
+        'X-Title': SITE_NAME
     }
 });
 
@@ -22,62 +26,55 @@ const aiEnabled = new Map();
 
 // Generate QR code for WhatsApp Web
 client.on('qr', (qr) => {
-    console.log('Generating QR code...');
-    qrcode.generate(qr, {
-        small: true,
-        scale: 4,
-        errorCorrectionLevel: 'L'
-    });
-    console.log('QR code generated. Scan it with WhatsApp.');
+    console.log('Scan this QR code with WhatsApp:');
+    qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {
-    console.log('WhatsApp bot is ready!');
+    console.log('✅ WhatsApp bot is ready!');
 });
 
 client.on('message', async (message) => {
     const chat = await message.getChat();
     const command = message.body.toLowerCase();
 
-    // Handle AI toggle commands
+    // Handle AI activation
     if (command === '.ai on') {
         aiEnabled.set(chat.id._serialized, true);
-        message.reply('AI chat is now enabled! 🤖');
+        message.reply('🤖 AI chat is now enabled!');
         return;
     }
     if (command === '.ai off') {
         aiEnabled.set(chat.id._serialized, false);
-        message.reply('AI chat is now disabled! 👋');
+        message.reply('👋 AI chat is now disabled!');
         return;
     }
 
-    // Check if AI is enabled for this chat
-    if (!aiEnabled.get(chat.id._serialized)) {
-        return;
-    }
+    // Check if AI is enabled for the chat
+    if (!aiEnabled.get(chat.id._serialized)) return;
 
     try {
+        const model = genAI.getGenerativeModel({ model: 'google/gemini-pro' });
+
         // Handle image messages
         if (message.hasMedia) {
             const media = await message.downloadMedia();
             if (media.mimetype.startsWith('image/')) {
-                const model = genAI.getGenerativeModel({ model: 'google/gemini-2.0-pro-exp-02-05:free' });
                 const result = await model.generateContent([
-                    { type: 'text', text: 'What is in this image?' },
+                    { type: 'text', text: 'Describe this image.' },
                     { type: 'image_url', image_url: { url: `data:${media.mimetype};base64,${media.data}` } }
                 ]);
-                message.reply(result.response.text());
+                message.reply(result.response.text() || '⚠️ Could not process the image.');
                 return;
             }
         }
 
         // Handle text messages
-        const model = genAI.getGenerativeModel({ model: 'google/gemini-2.0-pro-exp-02-05:free' });
         const result = await model.generateContent(message.body);
-        message.reply(result.response.text());
+        message.reply(result.response.text() || '⚠️ AI did not return a response.');
     } catch (error) {
-        console.error('Error processing message:', error);
-        message.reply('Sorry, I encountered an error while processing your request. 😔');
+        console.error('❌ Error:', error.response?.data || error.message);
+        message.reply('🚨 Sorry, an error occurred while processing your request.');
     }
 });
 
